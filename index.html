@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speed Guardian AI - Advanced Demo</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#0a0f1c;color:white;text-align:center}
+header{background:#111827;padding:15px;font-size:22px;color:#22d3ee}
+.container{padding:15px}
+.dashboard{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.card{background:#111827;padding:20px;border-radius:15px;box-shadow:0 0 15px #00eaff33}
+.speed{font-size:60px;color:#22d3ee}
+button{padding:8px 15px;border:none;border-radius:8px;margin:5px;cursor:pointer}
+#map{height:250px;border-radius:15px}
+canvas{background:#020617;border-radius:15px}
+
+#fullAlert{
+display:none;
+position:fixed;
+top:0;left:0;
+width:100%;height:100%;
+z-index:9999;
+justify-content:center;
+align-items:center;
+flex-direction:column;
+color:white;
+font-size:36px;
+font-weight:bold;
+text-align:center;
+background:#111;
+}
+
+@keyframes flashRed {
+0%{background:#ff0000;}
+50%{background:#550000;}
+100%{background:#ff0000;}
+}
+.flash{animation:flashRed 0.5s infinite;}
+
+#summaryPopup{
+display:none;
+position:fixed;
+top:0;left:0;
+width:100%;height:100%;
+background:rgba(0,0,0,0.85);
+justify-content:center;
+align-items:center;
+z-index:10000;
+color:white;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+🚀 Speed Guardian AI - Advanced Demo
+<div id="clock"></div>
+</header>
+
+<div class="container">
+<div class="dashboard">
+
+<div class="card">
+<div class="speed" id="speed">0</div>
+km/h<br><br>
+
+จำกัดความเร็ว
+<input id="limit" type="number" value="60">
+
+<hr>
+⭐ Score <h2 id="score">100</h2>
+🚨 Overspeed <h3 id="over">0</h3>
+⏱ Time <h3 id="time">0</h3>
+
+<button onclick="start()">เริ่ม</button>
+<button onclick="stopTrip()">จบ</button>
+<button onclick="simulateCrash()" style="background:#dc2626;color:white">💥 Crash</button>
+
+<hr>
+<h3>Speed Simulation</h3>
+<button onclick="simulateLevel('low')">Low</button>
+<button onclick="simulateLevel('medium')">Medium</button>
+<button onclick="simulateLevel('high')">High</button>
+<button onclick="simulateLevel('crash')">Crash Mode</button>
+
+<br><br>
+Manual Speed:
+<input type="range" min="0" max="150" value="0" 
+oninput="manualSpeed(this.value)">
+<span id="manualValue">0</span> km/h
+</div>
+
+<div class="card">
+<canvas id="chart"></canvas>
+</div>
+
+<div class="card">
+<div id="map"></div>
+</div>
+
+</div>
+</div>
+
+<div id="fullAlert"></div>
+
+<div id="summaryPopup">
+<div style="background:#111827;padding:30px;border-radius:20px;width:350px;text-align:center;">
+<h2>📊 สรุปผล</h2>
+<h3 id="sumTime"></h3>
+<h3 id="sumOver"></h3>
+<h3 id="sumScore"></h3>
+<br>
+<button onclick="closeSummary()" 
+style="padding:10px 20px;background:#22d3ee;border:none;border-radius:10px;">
+ปิด
+</button>
+</div>
+</div>
+
+<script>
+
+let timer,startTime,demoInterval
+let score=100,overspeed=0,lastSpeed=0
+let alarmAudio=null
+let countdownInterval=null
+let isAlerting=false
+
+const beepSound=new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg")
+
+setInterval(()=>{
+document.getElementById("clock").innerText=
+new Date().toLocaleTimeString()
+},1000)
+
+let map=L.map('map').setView([13.736717,100.523186],13)
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map)
+
+const chart=new Chart(document.getElementById("chart"),{
+type:'line',
+data:{labels:[],datasets:[{label:'Speed',data:[],borderColor:'#22d3ee'}]},
+options:{animation:false}
+})
+
+function start(){
+resetTrip()
+startTime=Date.now()
+timer=setInterval(()=>{
+document.getElementById("time").innerText=
+Math.floor((Date.now()-startTime)/1000)
+},1000)
+}
+
+function stopTrip(){
+clearInterval(timer)
+stopAllAlerts()
+showSummary()
+resetTrip()
+}
+
+function updateSystem(kmh){
+
+document.getElementById("speed").innerText=kmh.toFixed(0)
+
+chart.data.labels.push('')
+chart.data.datasets[0].data.push(kmh)
+if(chart.data.labels.length>20){
+chart.data.labels.shift()
+chart.data.datasets[0].data.shift()
+}
+chart.update()
+
+let limit=parseInt(document.getElementById("limit").value)
+
+if(kmh>limit && !isAlerting){
+startPreAlert("🚨 ขับเร็วเกินกำหนด")
+}
+
+overspeed += kmh>limit?1:0
+score = kmh>limit?Math.max(0,score-2):score
+
+document.getElementById("score").innerText=score
+document.getElementById("over").innerText=overspeed
+
+if(lastSpeed>60 && kmh<5){
+simulateCrash()
+}
+lastSpeed=kmh
+}
+
+function startPreAlert(message){
+
+isAlerting=true
+let seconds=5
+let box=document.getElementById("fullAlert")
+box.style.display="flex"
+box.classList.remove("flash")
+
+countdownInterval=setInterval(()=>{
+
+beepSound.currentTime=0
+beepSound.play()
+
+box.innerHTML=
+message+"<br><br>กำลังแจ้งเตือนใน "+seconds+
+" วินาที<br><br><button onclick='cancelAlert()' style='padding:12px 25px;font-size:18px;background:black;color:white;border:none;border-radius:10px;'>ยกเลิกทันที</button>"
+
+seconds--
+
+if(seconds<0){
+clearInterval(countdownInterval)
+activateFullAlert()
+}
+
+},1000)
+}
+
+function activateFullAlert(){
+let box=document.getElementById("fullAlert")
+box.innerHTML=
+"🚨 DANGEROUS DRIVING DETECTED 🚨"+
+"<br><br><button onclick='cancelAlert()' style='padding:15px 30px;font-size:20px;background:black;color:white;border:none;border-radius:10px;'>ยกเลิก</button>"
+box.classList.add("flash")
+playAlarm()
+}
+
+function cancelAlert(){
+stopAllAlerts()
+showSummary()
+resetTrip()
+}
+
+function simulateCrash(){
+if(!isAlerting)
+startPreAlert("💥 ตรวจพบการชนรุนแรง")
+}
+
+function simulateLevel(level){
+
+clearInterval(demoInterval)
+stopAllAlerts()
+
+if(level==="low"){
+demoInterval=setInterval(()=>updateSystem(30+Math.random()*20),1000)
+}
+if(level==="medium"){
+demoInterval=setInterval(()=>updateSystem(60+Math.random()*20),1000)
+}
+if(level==="high"){
+demoInterval=setInterval(()=>updateSystem(90+Math.random()*30),1000)
+}
+if(level==="crash"){
+demoInterval=setInterval(()=>updateSystem(120),1000)
+setTimeout(()=>{
+clearInterval(demoInterval)
+updateSystem(0)
+simulateCrash()
+},4000)
+}
+}
+
+function manualSpeed(val){
+document.getElementById("manualValue").innerText=val
+updateSystem(parseInt(val))
+}
+
+function playAlarm(){
+alarmAudio=new Audio("https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg")
+alarmAudio.loop=true
+alarmAudio.play()
+}
+
+function stopAllAlerts(){
+clearInterval(countdownInterval)
+beepSound.pause()
+beepSound.currentTime=0
+if(alarmAudio){
+alarmAudio.pause()
+alarmAudio.currentTime=0
+alarmAudio=null
+}
+document.getElementById("fullAlert").style.display="none"
+isAlerting=false
+}
+
+function showSummary(){
+document.getElementById("sumTime").innerText="เวลา: "+document.getElementById("time").innerText+" วินาที"
+document.getElementById("sumOver").innerText="เกินความเร็ว: "+overspeed+" ครั้ง"
+document.getElementById("sumScore").innerText="คะแนน: "+score
+document.getElementById("summaryPopup").style.display="flex"
+}
+
+function closeSummary(){
+document.getElementById("summaryPopup").style.display="none"
+}
+
+function resetTrip(){
+score=100
+overspeed=0
+lastSpeed=0
+document.getElementById("speed").innerText=0
+document.getElementById("score").innerText=100
+document.getElementById("over").innerText=0
+document.getElementById("time").innerText=0
+chart.data.labels=[]
+chart.data.datasets[0].data=[]
+chart.update()
+clearInterval(demoInterval)
+}
+
+</script>
+</body>
+</html>
