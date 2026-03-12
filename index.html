@@ -21,19 +21,9 @@ button{padding:8px 15px;border:none;border-radius:8px;margin:5px;cursor:pointer}
 canvas{background:#020617;border-radius:15px}
 
 #fullAlert{
-display:none;
-position:fixed;
-top:0;left:0;
-width:100%;height:100%;
-z-index:9999;
-justify-content:center;
-align-items:center;
-flex-direction:column;
-color:white;
-font-size:32px;
-font-weight:bold;
-text-align:center;
-background:#111;
+display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+z-index:9999;justify-content:center;align-items:center;flex-direction:column;
+color:white;font-size:32px;font-weight:bold;text-align:center;background:#111;
 }
 
 @keyframes flashRed {
@@ -44,15 +34,9 @@ background:#111;
 .flash{animation:flashRed 0.5s infinite;}
 
 #summaryPopup{
-display:none;
-position:fixed;
-top:0;left:0;
-width:100%;height:100%;
-background:rgba(0,0,0,0.85);
-justify-content:center;
-align-items:center;
-z-index:10000;
-color:white;
+display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+background:rgba(0,0,0,0.85);justify-content:center;align-items:center;
+z-index:10000;color:white;
 }
 </style>
 </head>
@@ -132,6 +116,11 @@ let countdownInterval=null
 let isAlerting=false
 let tripleBeepInterval=null
 
+// ===== GPS VARIABLES =====
+let gpsWatchId=null
+let gpsMarker=null
+let gpsRoute=null
+
 const beepSound=new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg")
 
 // CLOCK
@@ -144,6 +133,10 @@ new Date().toLocaleTimeString()
 let map=L.map('map').setView([13.736717,100.523186],13)
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map)
 
+// GPS marker + route
+gpsMarker=L.marker([13.736717,100.523186]).addTo(map)
+gpsRoute=L.polyline([],{color:'lime'}).addTo(map)
+
 // CHART
 const chart=new Chart(document.getElementById("chart"),{
 type:'line',
@@ -151,7 +144,70 @@ data:{labels:[],datasets:[{label:'Speed',data:[],borderColor:'#22d3ee'}]},
 options:{animation:false}
 })
 
-// AUDIO UNLOCK
+// START
+function start(){
+unlockAudio()
+resetTrip()
+startTime=Date.now()
+
+timer=setInterval(()=>{
+document.getElementById("time").innerText=
+Math.floor((Date.now()-startTime)/1000)
+},1000)
+
+startGPS()
+}
+
+// STOP
+function stopTrip(){
+clearInterval(timer)
+stopGPS()
+stopAllAlerts()
+showSummary()
+resetTrip()
+}
+
+// ===== GPS FUNCTION =====
+function startGPS(){
+
+if(!navigator.geolocation){
+alert("อุปกรณ์ไม่รองรับ GPS")
+return
+}
+
+gpsWatchId=navigator.geolocation.watchPosition(position=>{
+
+let lat=position.coords.latitude
+let lon=position.coords.longitude
+let speed=position.coords.speed
+
+gpsMarker.setLatLng([lat,lon])
+gpsRoute.addLatLng([lat,lon])
+map.setView([lat,lon],16)
+
+if(speed!==null){
+updateSystem(speed*3.6)
+}
+
+},error=>{
+alert("ไม่สามารถเข้าถึงตำแหน่งได้")
+},{
+enableHighAccuracy:true,
+maximumAge:0,
+timeout:5000
+})
+
+}
+
+function stopGPS(){
+if(gpsWatchId!==null){
+navigator.geolocation.clearWatch(gpsWatchId)
+gpsWatchId=null
+}
+}
+
+// ===== ระบบเดิมทั้งหมด =====
+
 function unlockAudio(){
 beepSound.volume=0
 beepSound.play().then(()=>{
@@ -161,26 +217,6 @@ beepSound.volume=1
 }).catch(()=>{})
 }
 
-// START
-function start(){
-unlockAudio()
-resetTrip()
-startTime=Date.now()
-timer=setInterval(()=>{
-document.getElementById("time").innerText=
-Math.floor((Date.now()-startTime)/1000)
-},1000)
-}
-
-// STOP
-function stopTrip(){
-clearInterval(timer)
-stopAllAlerts()
-showSummary()
-resetTrip()
-}
-
-// SYSTEM
 function updateSystem(kmh){
 
 document.getElementById("speed").innerText=kmh.toFixed(0)
@@ -211,7 +247,6 @@ simulateCrash()
 lastSpeed=kmh
 }
 
-// PRE ALERT
 function startPreAlert(message){
 isAlerting=true
 let seconds=5
@@ -220,54 +255,38 @@ box.style.display="flex"
 box.classList.remove("flash")
 
 countdownInterval=setInterval(()=>{
-
 beepSound.currentTime=0
 beepSound.play()
-
 box.innerHTML=
 message+"<br><br>แจ้งเตือนใน "+seconds+
 " วินาที<br><br><button onclick='cancelAlert()'>ยกเลิกทันที</button>"
-
 seconds--
-
 if(seconds<0){
 clearInterval(countdownInterval)
 activateFullAlert()
 }
-
 },1000)
 }
 
-// FULL ALERT (Triple Beep Loop)
 function activateFullAlert(){
-
 let box=document.getElementById("fullAlert")
 box.innerHTML=
 "🚨 DANGEROUS DRIVING DETECTED 🚨<br><br><button onclick='cancelAlert()'>ยกเลิก</button>"
 box.classList.add("flash")
-
 startTripleBeepLoop()
 }
 
 function startTripleBeepLoop(){
-
-tripleBeepInterval=setInterval(()=>{
-
-playTripleBeep()
-
-},1500) // รอบละ 1.5 วิ
-
+tripleBeepInterval=setInterval(()=>{playTripleBeep()},1500)
 }
 
 function playTripleBeep(){
-
 for(let i=0;i<3;i++){
 setTimeout(()=>{
 beepSound.currentTime=0
 beepSound.play()
 },i*200)
 }
-
 }
 
 function cancelAlert(){
@@ -318,7 +337,6 @@ document.getElementById("fullAlert").style.display="none"
 isAlerting=false
 }
 
-// SUMMARY
 function showSummary(){
 document.getElementById("sumTime").innerText="เวลา: "+document.getElementById("time").innerText+" วินาที"
 document.getElementById("sumOver").innerText="เกินความเร็ว: "+overspeed+" ครั้ง"
@@ -330,7 +348,6 @@ function closeSummary(){
 document.getElementById("summaryPopup").style.display="none"
 }
 
-// RESET
 function resetTrip(){
 score=100
 overspeed=0
@@ -343,6 +360,7 @@ chart.data.labels=[]
 chart.data.datasets[0].data=[]
 chart.update()
 clearInterval(demoInterval)
+gpsRoute.setLatLngs([])
 }
 
 </script>
